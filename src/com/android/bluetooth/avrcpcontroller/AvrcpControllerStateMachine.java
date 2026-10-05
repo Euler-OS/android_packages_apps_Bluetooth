@@ -324,6 +324,15 @@ class AvrcpControllerStateMachine extends StateMachine {
                             getAbsVolume(), mVolumeNotificationLabel);
                     return true;
 
+                case MESSAGE_PROCESS_VOLUME_CHANGED_NOTIFICATION:
+                    handleLocalVolumeChanged();
+                    return true;
+
+                case MESSAGE_INTERNAL_ABS_VOL_TIMEOUT:
+                    // The remote's volume change produced no local change to echo.
+                    mVolumeChangedNotificationsToIgnore = 0;
+                    return true;
+
                 case MESSAGE_GET_FOLDER_ITEMS:
                     transitionTo(mGetFolderList);
                     return true;
@@ -761,6 +770,27 @@ class AvrcpControllerStateMachine extends StateMachine {
             mAudioManager.setStreamVolume(AudioManager.STREAM_MUSIC, reqLocalVolume,
                     AudioManager.FLAG_SHOW_UI);
         }
+    }
+
+    /**
+     * Tell the remote (source) that our volume changed, so its volume slider follows ours.
+     * Changes caused by the remote's own SetAbsoluteVolume are not echoed back. The remote
+     * must register again after each CHANGED response, so the label is consumed here.
+     */
+    private void handleLocalVolumeChanged() {
+        if (mIsVolumeFixed || mVolumeNotificationLabel < 0) {
+            return;
+        }
+        if (mVolumeChangedNotificationsToIgnore > 0) {
+            mVolumeChangedNotificationsToIgnore--;
+            logD("handleLocalVolumeChanged: change came from remote, not echoing");
+            return;
+        }
+        int absVol = getAbsVolume();
+        logD("handleLocalVolumeChanged: notifying remote, absVol = " + absVol);
+        mService.sendRegisterAbsVolRspNative(mDeviceAddress, NOTIFICATION_RSP_TYPE_CHANGED,
+                absVol, mVolumeNotificationLabel);
+        mVolumeNotificationLabel = -1;
     }
 
     private int getAbsVolume() {
