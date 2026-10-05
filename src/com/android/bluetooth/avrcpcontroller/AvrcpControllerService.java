@@ -21,7 +21,11 @@ import android.bluetooth.BluetoothAvrcpPlayerSettings;
 import android.bluetooth.BluetoothDevice;
 import android.bluetooth.BluetoothProfile;
 import android.bluetooth.IBluetoothAvrcpController;
+import android.content.BroadcastReceiver;
+import android.content.Context;
 import android.content.Intent;
+import android.content.IntentFilter;
+import android.media.AudioManager;
 import android.media.MediaDescription;
 import android.media.browse.MediaBrowser.MediaItem;
 import android.media.session.PlaybackState;
@@ -101,6 +105,22 @@ public class AvrcpControllerService extends ProfileService {
         classInitNative();
     }
 
+    // Forward local STREAM_MUSIC changes so connected sources can mirror our volume.
+    private final BroadcastReceiver mVolumeReceiver = new BroadcastReceiver() {
+        @Override
+        public void onReceive(Context context, Intent intent) {
+            if (!AudioManager.VOLUME_CHANGED_ACTION.equals(intent.getAction())
+                    || intent.getIntExtra(AudioManager.EXTRA_VOLUME_STREAM_TYPE, -1)
+                    != AudioManager.STREAM_MUSIC) {
+                return;
+            }
+            for (AvrcpControllerStateMachine stateMachine : mDeviceStateMap.values()) {
+                stateMachine.sendMessage(
+                        AvrcpControllerStateMachine.MESSAGE_PROCESS_VOLUME_CHANGED_NOTIFICATION);
+            }
+        }
+    };
+
     public AvrcpControllerService() {
         super();
         mAdapter = BluetoothAdapter.getDefaultAdapter();
@@ -111,6 +131,7 @@ public class AvrcpControllerService extends ProfileService {
         initNative();
         sBrowseTree = new BrowseTree(null);
         sService = this;
+        registerReceiver(mVolumeReceiver, new IntentFilter(AudioManager.VOLUME_CHANGED_ACTION));
 
         // Start the media browser service.
         Intent startIntent = new Intent(this, BluetoothMediaBrowserService.class);
@@ -120,6 +141,7 @@ public class AvrcpControllerService extends ProfileService {
 
     @Override
     protected boolean stop() {
+        unregisterReceiver(mVolumeReceiver);
         Intent stopIntent = new Intent(this, BluetoothMediaBrowserService.class);
         stopService(stopIntent);
         for (AvrcpControllerStateMachine stateMachine : mDeviceStateMap.values()) {
